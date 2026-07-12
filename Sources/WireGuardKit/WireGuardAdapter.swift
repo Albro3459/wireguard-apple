@@ -170,6 +170,24 @@ public class WireGuardAdapter {
         }
     }
 
+    /// Requests a lightweight refresh of the WireGuard network binding.
+    ///
+    /// A successful completion means the refresh was handed to wireguard-go. It does not mean
+    /// the bind update succeeded, a handshake completed, or traffic recovered. Callers must
+    /// verify recovery by observing later runtime configuration.
+    /// - Parameter completionHandler: completion handler.
+    public func refreshNetworkBinding(completionHandler: @escaping (WireGuardAdapterError?) -> Void) {
+        workQueue.async {
+            guard case .started(let handle, let settingsGenerator) = self.state else {
+                completionHandler(.invalidState)
+                return
+            }
+
+            self.refreshNetworkBinding(handle: handle, settingsGenerator: settingsGenerator)
+            completionHandler(nil)
+        }
+    }
+
     /// Start the tunnel tunnel.
     /// - Parameters:
     ///   - tunnelConfiguration: tunnel configuration.
@@ -417,19 +435,14 @@ public class WireGuardAdapter {
         self.logHandler(.verbose, "Network change detected with \(path.status) route and interface order \(path.availableInterfaces)")
 
         #if os(macOS)
-        if case .started(let handle, _) = self.state {
-            wgBumpSockets(handle)
+        if case .started(let handle, let settingsGenerator) = self.state {
+            self.refreshNetworkBinding(handle: handle, settingsGenerator: settingsGenerator)
         }
         #elseif os(iOS)
         switch self.state {
         case .started(let handle, let settingsGenerator):
             if path.status.isSatisfiable {
-                let (wgConfig, resolutionResults) = settingsGenerator.endpointUapiConfiguration()
-                self.logEndpointResolutionResults(resolutionResults)
-
-                wgSetConfig(handle, wgConfig)
-                wgDisableSomeRoamingForBrokenMobileSemantics(handle)
-                wgBumpSockets(handle)
+                self.refreshNetworkBinding(handle: handle, settingsGenerator: settingsGenerator)
             } else {
                 self.logHandler(.verbose, "Connectivity offline, pausing backend.")
 
@@ -463,6 +476,17 @@ public class WireGuardAdapter {
         #else
         #error("Unsupported")
         #endif
+    }
+
+    private func refreshNetworkBinding(handle: Int32, settingsGenerator: PacketTunnelSettingsGenerator) {
+        #if os(iOS)
+        let (wgConfig, resolutionResults) = settingsGenerator.endpointUapiConfiguration()
+        self.logEndpointResolutionResults(resolutionResults)
+
+        wgSetConfig(handle, wgConfig)
+        wgDisableSomeRoamingForBrokenMobileSemantics(handle)
+        #endif
+        wgBumpSockets(handle)
     }
 }
 

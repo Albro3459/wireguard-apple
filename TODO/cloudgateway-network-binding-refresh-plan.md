@@ -225,18 +225,17 @@ instead of only one call path.
 
 ## Repository work items
 
-1. Update `Sources/WireGuardKit/WireGuardAdapter.swift` only.
-2. Extract the shared private binding-refresh helper.
-3. Route the existing satisfiable path callback through it.
-4. Add and document `refreshNetworkBinding(completionHandler:)`.
-5. Manually review stopped, temporary-shutdown, start/stop, deinit, and path
-   callback ordering.
-6. User reviews and creates the fork commit.
-7. User publishes the fork commit; Codex must never push.
-8. Update CloudGateway's three exact revision references to the published
-   commit.
-9. Compile the fork through CloudGateway's unsigned iOS build.
-10. Device-test automatic and explicit refresh behavior.
+- [x] Update `Sources/WireGuardKit/WireGuardAdapter.swift` only.
+- [x] Extract the shared private binding-refresh helper.
+- [x] Route the existing satisfiable path callback through it.
+- [x] Add and document `refreshNetworkBinding(completionHandler:)`.
+- [x] Manually review stopped, temporary-shutdown, start/stop, deinit, and path
+  callback ordering.
+- [x] Create the local fork implementation commit.
+- [ ] User publishes the fork commit; Codex must never push.
+- [x] Update CloudGateway's three exact revision references to the local commit.
+- [x] Compile the fork through CloudGateway's unsigned iOS build.
+- [ ] Device-test automatic and explicit refresh behavior.
 
 ## Validation
 
