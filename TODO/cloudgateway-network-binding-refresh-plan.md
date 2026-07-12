@@ -234,7 +234,8 @@ instead of only one call path.
 - [x] Create the local fork implementation commit.
 - [ ] User publishes the fork commit; Codex must never push.
 - [x] Update CloudGateway's three exact revision references to the local commit.
-- [x] Compile the fork through CloudGateway's unsigned iOS build.
+- [ ] Compile the fork through CloudGateway's unsigned iOS build after the local
+  revision is published; SwiftPM cannot resolve an unpublished GitHub commit.
 - [ ] Device-test automatic and explicit refresh behavior.
 
 ## Validation
