@@ -174,7 +174,8 @@ public class WireGuardAdapter {
     ///
     /// A successful completion means the refresh was handed to wireguard-go. It does not mean
     /// the bind update succeeded, a handshake completed, or traffic recovered. Callers must
-    /// verify recovery by observing later runtime configuration.
+    /// verify recovery by observing later runtime configuration. A stopped or temporarily
+    /// shut down adapter completes with `WireGuardAdapterError.invalidState`.
     /// - Parameter completionHandler: completion handler.
     public func refreshNetworkBinding(completionHandler: @escaping (WireGuardAdapterError?) -> Void) {
         workQueue.async {
