@@ -232,10 +232,10 @@ instead of only one call path.
 - [x] Manually review stopped, temporary-shutdown, start/stop, deinit, and path
   callback ordering.
 - [x] Create the local fork implementation commit.
-- [ ] User publishes the fork commit; Codex must never push.
+- [x] User published the fork commit; Codex must never push.
 - [x] Update CloudGateway's three exact revision references to the local commit.
-- [ ] Compile the fork through CloudGateway's unsigned iOS build after the local
-  revision is published; SwiftPM cannot resolve an unpublished GitHub commit.
+- [x] Compile the fork through CloudGateway's unsigned iOS build after the
+  revision was published.
 - [ ] Device-test automatic and explicit refresh behavior.
 
 ## Validation
