@@ -210,10 +210,6 @@ public class WireGuardAdapter {
             }
 
             self.packetTunnelProvider?.reasserting = true
-            defer {
-                self.packetTunnelProvider?.reasserting = false
-            }
-
             wgTurnOff(handle)
 
             do {
@@ -221,9 +217,11 @@ public class WireGuardAdapter {
                     try self.restartBackend(settingsGenerator: settingsGenerator),
                     settingsGenerator
                 )
+                self.packetTunnelProvider?.reasserting = false
                 completionHandler(nil)
             } catch let error as WireGuardAdapterError {
                 self.state = .temporaryShutdown(settingsGenerator)
+                self.packetTunnelProvider?.reasserting = false
                 completionHandler(error)
             } catch {
                 fatalError()
