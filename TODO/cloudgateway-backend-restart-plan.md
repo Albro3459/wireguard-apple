@@ -85,8 +85,9 @@ public func restartBackend(
 
 ### Completion contract
 
-* `nil`: the old backend was stopped, network settings were re-applied, and a
-  new backend handle is running.
+* `nil`: the old backend was stopped, network-settings reapplication was
+  requested with no error received before the existing five-second timeout,
+  and a new backend handle is running.
 * `.invalidState`: the adapter was `.stopped` or `.temporaryShutdown`.
 * `.setNetworkSettings` / `.startWireGuardBackend` /
   `.cannotLocateTunnelFileDescriptor`: the restart failed mid-sequence; see
@@ -149,8 +150,8 @@ Known quirks to preserve, not fix, in this patch:
 
 iOS is the required consumer, and the public API is iOS-only because only the
 iOS path observer resumes `.temporaryShutdown`. The extracted private helper
-continues compiling for macOS, where the existing path-resume flow uses it.
-No iOS-only symbols may leak outside the guarded public method.
+remains compilable in the shared macOS source path, although macOS does not
+invoke it. No iOS-only symbols may leak outside the guarded public method.
 
 No new dependency, target, framework, or Go/C bridge change is required.
 
