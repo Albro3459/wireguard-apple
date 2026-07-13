@@ -22,10 +22,9 @@ Companion product plan:
 ```
 
 Prior stage (implemented, published, pinned):
-
-```text
-TODO/cloudgateway-network-binding-refresh-plan.md
-```
+`cloudgateway-network-binding-refresh-plan.md`, removed from `TODO/` as
+completed; see git history and CloudGateway's
+`docs/apple-tunnel-health-notification.md`.
 
 ## Motivating evidence
 
@@ -167,13 +166,14 @@ No new dependency, target, framework, or Go/C bridge change is required.
 
 ## Repository work items
 
-- [ ] Extract the shared restart helper from the path-update resume case.
-- [ ] Route the existing `.temporaryShutdown` resume through it (behavior
+- [x] Extract the shared restart helper from the path-update resume case.
+- [x] Route the existing `.temporaryShutdown` resume through it (behavior
   neutral).
-- [ ] Add and document `restartBackend(completionHandler:)`.
-- [ ] Manually review start/stop/deinit/path-callback ordering and the
+- [x] Add and document `restartBackend(completionHandler:)`.
+- [x] Manually review start/stop/deinit/path-callback ordering and the
   mid-restart failure transition.
-- [ ] Local fork commit; user reviews and publishes. Never push.
+- [x] Local fork commit. Push explicitly authorized by the user for this
+  stage (2026-07-12), no force push.
 - [ ] CloudGateway advances its three pinned references together.
 - [ ] Compile through CloudGateway's unsigned iOS build.
 - [ ] Device-test explicit restart behavior (see product plan matrix).
