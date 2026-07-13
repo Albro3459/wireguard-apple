@@ -53,8 +53,8 @@ needed sequence when a path returns to satisfiable:
 1. `setNetworkSettings(settingsGenerator.generateNetworkSettings())` -
    re-applies `NEPacketTunnelNetworkSettings`, which Apple documents as
    re-appliable while running and which rebuilds the tunnel's routes/flows.
-2. `settingsGenerator.uapiConfiguration()` with the startup-resolved
-   endpoints.
+2. `settingsGenerator.uapiConfiguration()` with the endpoints stored for the
+   current configuration.
 3. `startWireGuardBackend(wgConfig:)` - `wgTurnOn` a brand-new wireguard-go
    device (fresh sockets, handshake state, timers), plus the iOS roaming
    workaround.
@@ -66,9 +66,9 @@ sequence explicitly callable from the `.started` state.
 
 ## Known limitation preserved
 
-Like `refreshNetworkBinding`, this operation uses the endpoints resolved at
-adapter startup (`uapiConfiguration` on the stored `resolvedEndpoints`). It
-does not re-resolve the original endpoint hostname: with the tunnel's network
+Like `refreshNetworkBinding`, this operation uses the current settings
+generator's stored `resolvedEndpoints`. It does not re-resolve the original
+endpoint hostname: with the tunnel's network
 settings still applied, DNS would route into the dead tunnel. A deployment
 that changes the server IP therefore still requires the documented user
 toggle. Original-hostname refresh remains a separately designed follow-up.
@@ -93,6 +93,8 @@ public func restartBackend(
   failure semantics below.
 * Completion is invoked on the adapter's private `workQueue`, matching the
   other callback APIs. Callers must redispatch.
+* The provider's `reasserting` flag is true while the backend is being
+  recreated and is cleared before completion on both success and failure.
 * Unlike `refreshNetworkBinding`, a `nil` completion means a new backend is
   actually running - but it does not mean a handshake completed or traffic
   recovered. Callers must still verify via runtime handshake/RX progress.
@@ -126,7 +128,8 @@ Known quirks to preserve, not fix, in this patch:
 * `setNetworkSettings` waits at most 5 seconds for the system callback and
   proceeds on timeout (existing upstream workaround). The restart can
   therefore block `workQueue` for up to ~5 seconds; callers' completions on
-  other APIs queue behind it. Document this; do not redesign it here.
+  other APIs queue behind it. Its predicate and callback error are
+  synchronized so an early callback cannot be lost or falsely report success.
 * `wgTurnOn` failure returns a negative handle and throws
   `.startWireGuardBackend`; there is no partial-backend state to clean up.
 
@@ -144,10 +147,10 @@ Known quirks to preserve, not fix, in this patch:
 
 ## Platform behavior
 
-iOS is the required consumer. The sequence must continue compiling for macOS:
-`setNetworkSettings`, `uapiConfiguration`, and `startWireGuardBackend` are not
-platform-gated, and the roaming workaround is already `#if os(iOS)` inside
-`startWireGuardBackend`. No iOS-only symbols may leak into shared build paths.
+iOS is the required consumer, and the public API is iOS-only because only the
+iOS path observer resumes `.temporaryShutdown`. The extracted private helper
+continues compiling for macOS, where the existing path-resume flow uses it.
+No iOS-only symbols may leak outside the guarded public method.
 
 No new dependency, target, framework, or Go/C bridge change is required.
 
@@ -157,9 +160,10 @@ No new dependency, target, framework, or Go/C bridge change is required.
    into one private helper (settings re-apply + uapi config + backend start)
    that both the path observer and the new API call. Do not duplicate the
    logic.
-2. `restartBackend` enqueues on `workQueue`, guards `.started`, calls
-   `wgTurnOff`, then the shared helper; on helper failure transitions to
-   `.temporaryShutdown` and completes with the error.
+2. The iOS-only `restartBackend` enqueues on `workQueue`, guards `.started`,
+   marks the provider reasserting, calls `wgTurnOff`, then the shared helper;
+   on helper failure it transitions to `.temporaryShutdown`, clears
+   reasserting, and completes with the error.
 3. Keep the patch Swift-only in `WireGuardAdapter.swift`.
 4. Preserve existing logging; add no new fields containing endpoints,
    counters, or identifiers.
@@ -174,8 +178,8 @@ No new dependency, target, framework, or Go/C bridge change is required.
   mid-restart failure transition.
 - [x] Local fork commit. Push explicitly authorized by the user for this
   stage (2026-07-12), no force push.
-- [ ] CloudGateway advances its three pinned references together.
-- [ ] Compile through CloudGateway's unsigned iOS build.
+- [x] CloudGateway advances its three pinned references together.
+- [x] Compile through CloudGateway's unsigned iOS build.
 - [ ] Device-test explicit restart behavior (see product plan matrix).
 
 ## Validation

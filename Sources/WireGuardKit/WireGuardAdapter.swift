@@ -189,9 +189,10 @@ public class WireGuardAdapter {
         }
     }
 
+    #if os(iOS)
     /// Restarts the WireGuard backend in place: stops the running backend, re-applies the
-    /// tunnel network settings, and starts a fresh backend using the endpoints resolved at
-    /// adapter start. The original endpoint hostname is not re-resolved.
+    /// tunnel network settings, and starts a fresh backend using the endpoints stored for
+    /// the current configuration. The original endpoint hostname is not re-resolved.
     ///
     /// A `nil` completion means a new backend is running. It does not mean a handshake
     /// completed or traffic recovered; callers must verify recovery by observing later
@@ -206,6 +207,11 @@ public class WireGuardAdapter {
             guard case .started(let handle, let settingsGenerator) = self.state else {
                 completionHandler(.invalidState)
                 return
+            }
+
+            self.packetTunnelProvider?.reasserting = true
+            defer {
+                self.packetTunnelProvider?.reasserting = false
             }
 
             wgTurnOff(handle)
@@ -224,6 +230,7 @@ public class WireGuardAdapter {
             }
         }
     }
+    #endif
 
     /// Start the tunnel tunnel.
     /// - Parameters:
@@ -368,26 +375,32 @@ public class WireGuardAdapter {
     /// - Returns: `PacketTunnelSettingsGenerator`.
     private func setNetworkSettings(_ networkSettings: NEPacketTunnelNetworkSettings) throws {
         var systemError: Error?
+        var completed = false
         let condition = NSCondition()
 
-        // Activate the condition
-        condition.lock()
-        defer { condition.unlock() }
-
         self.packetTunnelProvider?.setTunnelNetworkSettings(networkSettings) { error in
+            condition.lock()
             systemError = error
+            completed = true
             condition.signal()
+            condition.unlock()
         }
 
         // Packet tunnel's `setTunnelNetworkSettings` times out in certain
         // scenarios & never calls the given callback.
         let setTunnelNetworkSettingsTimeout: TimeInterval = 5 // seconds
+        let deadline = Date().addingTimeInterval(setTunnelNetworkSettingsTimeout)
 
-        if condition.wait(until: Date().addingTimeInterval(setTunnelNetworkSettingsTimeout)) {
-            if let systemError = systemError {
-                throw WireGuardAdapterError.setNetworkSettings(systemError)
-            }
-        } else {
+        condition.lock()
+        while !completed, condition.wait(until: deadline) {}
+        let didComplete = completed
+        let completionError = systemError
+        condition.unlock()
+
+        if let completionError {
+            throw WireGuardAdapterError.setNetworkSettings(completionError)
+        }
+        if !didComplete {
             self.logHandler(.error, "setTunnelNetworkSettings timed out after 5 seconds; proceeding anyway")
         }
     }
