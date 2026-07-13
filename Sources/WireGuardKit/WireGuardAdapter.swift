@@ -189,6 +189,42 @@ public class WireGuardAdapter {
         }
     }
 
+    /// Restarts the WireGuard backend in place: stops the running backend, re-applies the
+    /// tunnel network settings, and starts a fresh backend using the endpoints resolved at
+    /// adapter start. The original endpoint hostname is not re-resolved.
+    ///
+    /// A `nil` completion means a new backend is running. It does not mean a handshake
+    /// completed or traffic recovered; callers must verify recovery by observing later
+    /// runtime configuration. A stopped or temporarily shut down adapter completes with
+    /// `WireGuardAdapterError.invalidState` without touching the backend. If the restart
+    /// fails after the old backend was stopped, the adapter transitions to temporary
+    /// shutdown, the network path observer owns any later resume, and the error is passed
+    /// to the completion handler.
+    /// - Parameter completionHandler: completion handler.
+    public func restartBackend(completionHandler: @escaping (WireGuardAdapterError?) -> Void) {
+        workQueue.async {
+            guard case .started(let handle, let settingsGenerator) = self.state else {
+                completionHandler(.invalidState)
+                return
+            }
+
+            wgTurnOff(handle)
+
+            do {
+                self.state = .started(
+                    try self.restartBackend(settingsGenerator: settingsGenerator),
+                    settingsGenerator
+                )
+                completionHandler(nil)
+            } catch let error as WireGuardAdapterError {
+                self.state = .temporaryShutdown(settingsGenerator)
+                completionHandler(error)
+            } catch {
+                fatalError()
+            }
+        }
+    }
+
     /// Start the tunnel tunnel.
     /// - Parameters:
     ///   - tunnelConfiguration: tunnel configuration.
@@ -457,13 +493,8 @@ public class WireGuardAdapter {
             self.logHandler(.verbose, "Connectivity online, resuming backend.")
 
             do {
-                try self.setNetworkSettings(settingsGenerator.generateNetworkSettings())
-
-                let (wgConfig, resolutionResults) = settingsGenerator.uapiConfiguration()
-                self.logEndpointResolutionResults(resolutionResults)
-
                 self.state = .started(
-                    try self.startWireGuardBackend(wgConfig: wgConfig),
+                    try self.restartBackend(settingsGenerator: settingsGenerator),
                     settingsGenerator
                 )
             } catch {
@@ -488,6 +519,15 @@ public class WireGuardAdapter {
         wgDisableSomeRoamingForBrokenMobileSemantics(handle)
         #endif
         wgBumpSockets(handle)
+    }
+
+    private func restartBackend(settingsGenerator: PacketTunnelSettingsGenerator) throws -> Int32 {
+        try self.setNetworkSettings(settingsGenerator.generateNetworkSettings())
+
+        let (wgConfig, resolutionResults) = settingsGenerator.uapiConfiguration()
+        self.logEndpointResolutionResults(resolutionResults)
+
+        return try self.startWireGuardBackend(wgConfig: wgConfig)
     }
 }
 
