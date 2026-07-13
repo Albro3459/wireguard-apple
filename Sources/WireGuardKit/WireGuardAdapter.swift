@@ -224,7 +224,12 @@ public class WireGuardAdapter {
                 self.packetTunnelProvider?.reasserting = false
                 completionHandler(error)
             } catch {
-                fatalError()
+                // Restart helpers only throw WireGuardAdapterError today; if that
+                // ever changes, fail the attempt instead of crashing the tunnel.
+                self.state = .temporaryShutdown(settingsGenerator)
+                self.packetTunnelProvider?.reasserting = false
+                self.logHandler(.error, "restartBackend failed with unexpected error: \(error.localizedDescription)")
+                completionHandler(.invalidState)
             }
         }
     }
