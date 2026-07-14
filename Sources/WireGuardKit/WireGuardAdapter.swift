@@ -233,6 +233,10 @@ public class WireGuardAdapter {
                 self.packetTunnelProvider?.reasserting = false
                 completionHandler(nil)
             } catch {
+                // String(describing:) logs the adapter error case and payload
+                // (system error, backend code); localizedDescription hides them
+                // behind generic boilerplate. No key material is involved.
+                self.logHandler(.error, "restartBackend failed: \(String(describing: error)); retrying with prior network settings")
                 do {
                     self.state = .started(
                         try self.startBackend(settingsGenerator: settingsGenerator),
@@ -241,8 +245,15 @@ public class WireGuardAdapter {
                     self.packetTunnelProvider?.reasserting = false
                     completionHandler(nil)
                 } catch let fallbackError as WireGuardAdapterError {
+                    // The backend is parked in temporary shutdown. Clearing
+                    // `reasserting` here is deliberate, matching the offline
+                    // pause path: the caller's health polling and the network
+                    // path observer own recovery from this state, and the flag
+                    // must not stay latched on a backend that may never
+                    // restart on its own.
                     self.state = .temporaryShutdown(settingsGenerator)
                     self.packetTunnelProvider?.reasserting = false
+                    self.logHandler(.error, "restartBackend fallback failed: \(String(describing: fallbackError))")
                     completionHandler(fallbackError)
                 } catch {
                     // Backend helpers only throw WireGuardAdapterError today; if
