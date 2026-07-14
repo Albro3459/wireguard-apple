@@ -196,21 +196,34 @@ public class WireGuardAdapter {
     ///
     /// A `nil` completion means a new backend is running. It does not mean a handshake
     /// completed or traffic recovered; callers must verify recovery by observing later
-    /// runtime configuration. A stopped or temporarily shut down adapter completes with
-    /// `WireGuardAdapterError.invalidState` without touching the backend. If the restart
-    /// fails after the old backend was stopped, the adapter transitions to temporary
-    /// shutdown, the network path observer owns any later resume, and the error is passed
-    /// to the completion handler.
+    /// runtime configuration. A temporarily shut down adapter uses its saved settings to make
+    /// the same restart attempt without first stopping a backend. A stopped adapter completes
+    /// with `WireGuardAdapterError.invalidState` without touching the backend. If the deep
+    /// restart fails after the old backend was stopped, the adapter makes one fallback attempt
+    /// to start a backend using the still-active prior network settings. Only if that also
+    /// fails does it transition to temporary shutdown and pass the fallback error to the
+    /// completion handler; the network path observer owns any later resume.
     /// - Parameter completionHandler: completion handler.
     public func restartBackend(completionHandler: @escaping (WireGuardAdapterError?) -> Void) {
         workQueue.async {
-            guard case .started(let handle, let settingsGenerator) = self.state else {
+            let handle: Int32?
+            let settingsGenerator: PacketTunnelSettingsGenerator
+            switch self.state {
+            case .started(let startedHandle, let startedSettingsGenerator):
+                handle = startedHandle
+                settingsGenerator = startedSettingsGenerator
+            case .temporaryShutdown(let savedSettingsGenerator):
+                handle = nil
+                settingsGenerator = savedSettingsGenerator
+            case .stopped:
                 completionHandler(.invalidState)
                 return
             }
 
             self.packetTunnelProvider?.reasserting = true
-            wgTurnOff(handle)
+            if let handle {
+                wgTurnOff(handle)
+            }
 
             do {
                 self.state = .started(
@@ -219,17 +232,26 @@ public class WireGuardAdapter {
                 )
                 self.packetTunnelProvider?.reasserting = false
                 completionHandler(nil)
-            } catch let error as WireGuardAdapterError {
-                self.state = .temporaryShutdown(settingsGenerator)
-                self.packetTunnelProvider?.reasserting = false
-                completionHandler(error)
             } catch {
-                // Restart helpers only throw WireGuardAdapterError today; if that
-                // ever changes, fail the attempt instead of crashing the tunnel.
-                self.state = .temporaryShutdown(settingsGenerator)
-                self.packetTunnelProvider?.reasserting = false
-                self.logHandler(.error, "restartBackend failed with unexpected error: \(error.localizedDescription)")
-                completionHandler(.invalidState)
+                do {
+                    self.state = .started(
+                        try self.startBackend(settingsGenerator: settingsGenerator),
+                        settingsGenerator
+                    )
+                    self.packetTunnelProvider?.reasserting = false
+                    completionHandler(nil)
+                } catch let fallbackError as WireGuardAdapterError {
+                    self.state = .temporaryShutdown(settingsGenerator)
+                    self.packetTunnelProvider?.reasserting = false
+                    completionHandler(fallbackError)
+                } catch {
+                    // Backend helpers only throw WireGuardAdapterError today; if
+                    // that ever changes, fail safely instead of crashing the tunnel.
+                    self.state = .temporaryShutdown(settingsGenerator)
+                    self.packetTunnelProvider?.reasserting = false
+                    self.logHandler(.error, "restartBackend fallback failed with unexpected error: \(error.localizedDescription)")
+                    completionHandler(.invalidState)
+                }
             }
         }
     }
@@ -540,6 +562,10 @@ public class WireGuardAdapter {
     private func restartBackend(settingsGenerator: PacketTunnelSettingsGenerator) throws -> Int32 {
         try self.setNetworkSettings(settingsGenerator.generateNetworkSettings())
 
+        return try self.startBackend(settingsGenerator: settingsGenerator)
+    }
+
+    private func startBackend(settingsGenerator: PacketTunnelSettingsGenerator) throws -> Int32 {
         let (wgConfig, resolutionResults) = settingsGenerator.uapiConfiguration()
         self.logEndpointResolutionResults(resolutionResults)
 
