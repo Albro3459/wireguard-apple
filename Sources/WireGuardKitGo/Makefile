@@ -39,7 +39,7 @@ $(BUILDDIR)/libwg-go-$(1).a: export CGO_CFLAGS := $(CFLAGS_PREFIX) $(ARCH)
 $(BUILDDIR)/libwg-go-$(1).a: export CGO_LDFLAGS := $(CFLAGS_PREFIX) $(ARCH)
 $(BUILDDIR)/libwg-go-$(1).a: export GOOS := $(GOOS_$(PLATFORM_NAME))
 $(BUILDDIR)/libwg-go-$(1).a: export GOARCH := $(GOARCH_$(1))
-$(BUILDDIR)/libwg-go-$(1).a: $(GOROOT)/.prepared go.mod
+$(BUILDDIR)/libwg-go-$(1).a: $(GOROOT)/.prepared go.mod go.sum $(wildcard *.go)
 	go build -ldflags=-w -trimpath -v -o "$(BUILDDIR)/libwg-go-$(1).a" -buildmode c-archive
 	rm -f "$(BUILDDIR)/libwg-go-$(1).h"
 endef
@@ -57,4 +57,20 @@ clean:
 
 install: build
 
-.PHONY: clean build version-header install
+TEST_MACOS_SDK = $(shell xcrun --sdk macosx --show-sdk-path)
+TEST_MACOS_DEVELOPER = $(shell xcrun --sdk macosx --show-sdk-platform-path)/Developer
+
+test:
+	GOROOT="$(REAL_GOROOT)" go test ./...
+	mkdir -p "$(BUILDDIR)"
+	xcrun --sdk macosx swiftc -swift-version 5 -sdk "$(TEST_MACOS_SDK)" \
+		-F "$(TEST_MACOS_DEVELOPER)/Library/Frameworks" \
+		-I "$(TEST_MACOS_DEVELOPER)/usr/lib" -L "$(TEST_MACOS_DEVELOPER)/usr/lib" \
+		-Xlinker -rpath -Xlinker "$(TEST_MACOS_DEVELOPER)/Library/Frameworks" \
+		-Xlinker -rpath -Xlinker "$(TEST_MACOS_DEVELOPER)/Library/PrivateFrameworks" \
+		-Xlinker -rpath -Xlinker "$(TEST_MACOS_DEVELOPER)/usr/lib" \
+		../WireGuardKit/NetworkSettingsOperation.swift ../../Tests/NetworkSettings/main.swift \
+		-o "$(BUILDDIR)/network-settings-tests"
+	"$(BUILDDIR)/network-settings-tests"
+
+.PHONY: clean build version-header install test

@@ -31,6 +31,8 @@ let package = Package(
                 "go.mod",
                 "go.sum",
                 "api-apple.go",
+                "device-start.go",
+                "device-start_test.go",
                 "Makefile"
             ],
             publicHeadersPath: ".",

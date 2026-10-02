@@ -109,14 +109,12 @@ func wgTurnOn(settings *C.char, tunFd int32) int32 {
 	logger.Verbosef("Attaching to interface")
 	dev := device.NewDevice(tun, conn.NewStdNetBind(), logger)
 
-	err = dev.IpcSet(C.GoString(settings))
+	err = startConfiguredDevice(dev, C.GoString(settings))
 	if err != nil {
-		logger.Errorf("Unable to set IPC settings: %v", err)
-		unix.Close(dupTunFd)
+		logger.Errorf("Unable to configure or start device")
 		return -1
 	}
 
-	dev.Up()
 	logger.Verbosef("Device started")
 
 	var i int32
@@ -126,7 +124,7 @@ func wgTurnOn(settings *C.char, tunFd int32) int32 {
 		}
 	}
 	if i == math.MaxInt32 {
-		unix.Close(dupTunFd)
+		dev.Close()
 		return -1
 	}
 	tunnelHandles[i] = tunnelHandle{dev, logger}

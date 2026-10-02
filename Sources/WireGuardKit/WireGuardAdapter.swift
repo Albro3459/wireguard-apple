@@ -56,6 +56,8 @@ public class WireGuardAdapter {
     /// Adapter state.
     private var state: State = .stopped
 
+    private let networkSettingsOperation = NetworkSettingsOperation()
+
     /// Tunnel device file descriptor.
     private var tunnelFileDescriptor: Int32? {
         var ctlInfo = ctl_info()
@@ -233,10 +235,12 @@ public class WireGuardAdapter {
                 self.packetTunnelProvider?.reasserting = false
                 completionHandler(nil)
             } catch {
-                // String(describing:) logs the adapter error case and payload
-                // (system error, backend code); localizedDescription hides them
-                // behind generic boilerplate. No key material is involved.
-                self.logHandler(.error, "restartBackend failed: \(String(describing: error)); retrying with prior network settings")
+                guard !self.networkSettingsOperation.isFenced else {
+                    self.packetTunnelProvider?.reasserting = false
+                    completionHandler(error as? WireGuardAdapterError ?? .invalidState)
+                    return
+                }
+                self.logHandler(.error, "Backend restart failed; retrying with prior network settings")
                 do {
                     self.state = .started(
                         try self.startBackend(settingsGenerator: settingsGenerator),
@@ -253,14 +257,14 @@ public class WireGuardAdapter {
                     // restart on its own.
                     self.state = .temporaryShutdown(settingsGenerator)
                     self.packetTunnelProvider?.reasserting = false
-                    self.logHandler(.error, "restartBackend fallback failed: \(String(describing: fallbackError))")
+                    self.logHandler(.error, "Backend restart fallback failed")
                     completionHandler(fallbackError)
                 } catch {
                     // Backend helpers only throw WireGuardAdapterError today; if
                     // that ever changes, fail safely instead of crashing the tunnel.
                     self.state = .temporaryShutdown(settingsGenerator)
                     self.packetTunnelProvider?.reasserting = false
-                    self.logHandler(.error, "restartBackend fallback failed with unexpected error: \(error.localizedDescription)")
+                    self.logHandler(.error, "Backend restart fallback failed")
                     completionHandler(.invalidState)
                 }
             }
@@ -401,43 +405,27 @@ public class WireGuardAdapter {
         }
     }
 
-    /// Set network tunnel configuration.
-    /// This method ensures that the call to `setTunnelNetworkSettings` does not time out, as in
-    /// certain scenarios the completion handler given to it may not be invoked by the system.
-    ///
-    /// - Parameters:
-    ///   - networkSettings: an instance of type `NEPacketTunnelNetworkSettings`.
-    /// - Throws: an error of type `WireGuardAdapterError`.
-    /// - Returns: `PacketTunnelSettingsGenerator`.
+    /// Apply network settings only after confirmed completion
     private func setNetworkSettings(_ networkSettings: NEPacketTunnelNetworkSettings) throws {
-        var systemError: Error?
-        var completed = false
-        let condition = NSCondition()
-
-        self.packetTunnelProvider?.setTunnelNetworkSettings(networkSettings) { error in
-            condition.lock()
-            systemError = error
-            completed = true
-            condition.signal()
-            condition.unlock()
+        guard let packetTunnelProvider else {
+            throw WireGuardAdapterError.invalidState
         }
 
-        // Packet tunnel's `setTunnelNetworkSettings` times out in certain
-        // scenarios & never calls the given callback.
-        let setTunnelNetworkSettingsTimeout: TimeInterval = 5 // seconds
-        let deadline = Date().addingTimeInterval(setTunnelNetworkSettingsTimeout)
-
-        condition.lock()
-        while !completed, condition.wait(until: deadline) {}
-        let didComplete = completed
-        let completionError = systemError
-        condition.unlock()
-
-        if let completionError {
-            throw WireGuardAdapterError.setNetworkSettings(completionError)
-        }
-        if !didComplete {
-            self.logHandler(.error, "setTunnelNetworkSettings timed out after 5 seconds; proceeding anyway")
+        do {
+            try networkSettingsOperation.perform(timeout: 5) { completion in
+                packetTunnelProvider.setTunnelNetworkSettings(networkSettings, completionHandler: completion)
+            }
+        } catch {
+            if networkSettingsOperation.isFenced {
+                if case .started(let handle, _) = state {
+                    wgTurnOff(handle)
+                }
+                state = .stopped
+                networkMonitor?.cancel()
+                networkMonitor = nil
+                self.logHandler(.error, "Network settings completion was not confirmed; adapter fenced")
+            }
+            throw WireGuardAdapterError.setNetworkSettings(error)
         }
     }
 
